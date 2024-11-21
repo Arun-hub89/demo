@@ -1,0 +1,57 @@
+name: cicd
+
+on:
+  push:
+    branches: [ "main" ]
+ 
+
+jobs:
+  deploy-to-dev:
+    name: Deploy cicd
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout the code from your GitHub repository
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      # Set up Python environment
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.12'  # Change to your preferred Python version
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt  # Make sure your requirements.txt is in the repo
+
+      # SSH to Server and deploy
+      - name: SSH to Server
+        env:
+          SSH_SERVER_PRIVATE_KEY: ${{ secrets.MAIN_PRIVATE_KEY }}
+          SSH_SERVER_IP: ${{ secrets.MAIN_IP }}
+          SSH_SERVER_USER_NAME: ${{ secrets.MAIN_USER_NAME }}
+        run: |
+          mkdir -p $HOME/.ssh/
+          echo "$SSH_SERVER_PRIVATE_KEY" > $HOME/.ssh/id_ed25519 && chmod 600 $HOME/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=no -i $HOME/.ssh/id_ed25519 "${SSH_SERVER_USER_NAME}@${SSH_SERVER_IP}" << 'EOF'
+            # Go to the project directory
+            cd /home/${SSH_SERVER_USER_NAME}/demo || exit
+
+            # Pull the latest code from the repository
+            git pull origin main || exit
+
+            # Apply migrations
+            source /home/${SSH_SERVER_USER_NAME}/demo/venv/bin/activate  # Activate the virtualenv
+            python manage.py migrate || exit
+
+            # Restart the app (for example, using Gunicorn or PM2)
+            pm2 restart django-app || exit
+          EOF
+
+      # Clean up PEM files
+      - name: Remove PEM Files
+        run: |
+          rm -f $HOME/.ssh/id_ed25519
